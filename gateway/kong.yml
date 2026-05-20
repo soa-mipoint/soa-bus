@@ -1,0 +1,172 @@
+_format_version: "3.0"
+_transform: true
+
+# ─── JWT Consumer ─────────────────────────────────────────────────────────────
+# All user JWTs issued by Customer Service use `iss: mipoint-key`
+# Kong validates the signature; actual user identity is in the `sub` claim
+consumers:
+  - username: mipoint-app
+    jwt_secrets:
+      - key: mipoint-key
+        algorithm: HS256
+        secret: supersecretkey-change-in-production-min-32-chars
+
+# ─── Global Plugins ───────────────────────────────────────────────────────────
+plugins:
+  - name: rate-limiting
+    config:
+      minute: 120
+      hour: 3000
+      policy: local
+      error_message: "Rate limit exceeded. Try again later."
+
+  - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      bandwidth_metrics: true
+      upstream_health_metrics: true
+
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+      headers:
+        - Authorization
+        - Content-Type
+      max_age: 3600
+
+# ─── Services & Routes ────────────────────────────────────────────────────────
+
+services:
+  # ── Customer Service ────────────────────────────────────────────────────────
+  - name: customer-service
+    url: http://customer-service:8000
+    connect_timeout: 10000
+    write_timeout: 10000
+    read_timeout: 10000
+    routes:
+      # Public: register & login (no JWT required)
+      - name: customer-auth-routes
+        paths:
+          - /api/v1/users/register
+          - /api/v1/users/login
+        methods:
+          - POST
+        strip_path: false
+      # Public: health check
+      - name: customer-health
+        paths:
+          - /api/v1/users/health
+        methods:
+          - GET
+        strip_path: false
+      # Protected: profile endpoints
+      - name: customer-protected-routes
+        paths:
+          - /api/v1/users/profile
+        methods:
+          - GET
+          - PUT
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              claims_to_verify:
+                - exp
+              key_claim_name: iss
+
+  # ── Space Catalog Service ────────────────────────────────────────────────────
+  - name: space-catalog-service
+    url: http://space-catalog-service:8000
+    connect_timeout: 10000
+    write_timeout: 10000
+    read_timeout: 10000
+    routes:
+      # Public: search and view spaces
+      - name: spaces-public-routes
+        paths:
+          - /api/v1/spaces
+        methods:
+          - GET
+        strip_path: false
+      # Protected: create and manage spaces
+      - name: spaces-protected-routes
+        paths:
+          - /api/v1/spaces
+        methods:
+          - POST
+          - PUT
+          - DELETE
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              claims_to_verify:
+                - exp
+              key_claim_name: iss
+
+  # ── Booking Service ──────────────────────────────────────────────────────────
+  - name: booking-service
+    url: http://booking-service:8000
+    connect_timeout: 10000
+    write_timeout: 30000
+    read_timeout: 30000
+    routes:
+      - name: bookings-routes
+        paths:
+          - /api/v1/bookings
+        strip_path: false
+        plugins:
+          - name: jwt
+            config:
+              claims_to_verify:
+                - exp
+              key_claim_name: iss
+
+  # ── Health & Metrics (no auth) ───────────────────────────────────────────────
+  - name: customer-metrics
+    url: http://customer-service:8000
+    routes:
+      - name: customer-health-metrics
+        paths:
+          - /health
+          - /metrics
+        hosts:
+          - customer.mipoint.local
+
+  - name: catalog-metrics
+    url: http://space-catalog-service:8000
+    routes:
+      - name: catalog-health-metrics
+        paths:
+          - /health
+          - /metrics
+        hosts:
+          - catalog.mipoint.local
+
+  - name: booking-metrics
+    url: http://booking-service:8000
+    routes:
+      - name: booking-health-metrics
+        paths:
+          - /health
+          - /metrics
+        hosts:
+          - booking.mipoint.local
+
+  - name: notification-metrics
+    url: http://notification-service:8000
+    routes:
+      - name: notification-health-metrics
+        paths:
+          - /health
+          - /metrics
+        hosts:
+          - notification.mipoint.local

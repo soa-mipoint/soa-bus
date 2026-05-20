@@ -1,0 +1,161 @@
+### MiPoint API Test Collection
+### Use with VS Code REST Client extension or IntelliJ HTTP Client
+### Run: docker-compose up -d first
+
+@base = http://localhost:8000
+@customer_direct = http://localhost:8001
+@catalog_direct = http://localhost:8002
+@booking_direct = http://localhost:8003
+@token = PASTE_YOUR_TOKEN_HERE
+
+# ─── Health Checks ────────────────────────────────────────────────────────────
+
+### Customer Service health
+GET {{customer_direct}}/health
+
+### Space Catalog health
+GET {{catalog_direct}}/health
+
+### Booking Service health
+GET {{booking_direct}}/health
+
+# ─── Customer Service ─────────────────────────────────────────────────────────
+
+### 1. Register cliente
+# @name register
+POST {{customer_direct}}/api/v1/users/register
+Content-Type: application/json
+
+{
+  "nombre": "Juan Pérez",
+  "email": "juan@test.com",
+  "password": "password123",
+  "rol": "cliente"
+}
+
+### 2. Register anfitrión
+POST {{customer_direct}}/api/v1/users/register
+Content-Type: application/json
+
+{
+  "nombre": "María García",
+  "email": "maria@test.com",
+  "password": "password123",
+  "rol": "anfitrion"
+}
+
+### 3. Login
+# @name login
+POST {{customer_direct}}/api/v1/users/login
+Content-Type: application/json
+
+{
+  "email": "juan@test.com",
+  "password": "password123"
+}
+
+### 4. Get profile
+GET {{customer_direct}}/api/v1/users/profile
+Authorization: Bearer {{token}}
+
+### 5. Update profile
+PUT {{customer_direct}}/api/v1/users/profile
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "phone": "+51999888777",
+  "bio": "Organizador de eventos en Lima"
+}
+
+# ─── Space Catalog Service ────────────────────────────────────────────────────
+
+### 6. Create space (anfitrión token required)
+POST {{catalog_direct}}/api/v1/spaces
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "nombre": "Salón Miraflores Premium",
+  "descripcion": "Salón moderno con capacidad para 80 personas",
+  "direccion": "Av. Larco 456",
+  "distrito": "Miraflores",
+  "capacidad": 80,
+  "precio_hora": 150.0,
+  "fotos": [
+    "https://example.com/foto1.jpg",
+    "https://example.com/foto2.jpg"
+  ]
+}
+
+### 7. Search spaces
+GET {{catalog_direct}}/api/v1/spaces?capacidad=50&distrito=Miraflores&precio_max=200
+
+### 8. Get space by ID
+GET {{catalog_direct}}/api/v1/spaces/SPACE_ID_HERE
+
+### 9. Activate space (anfitrión)
+PUT {{catalog_direct}}/api/v1/spaces/SPACE_ID_HERE/status
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "estado": "ACTIVO"
+}
+
+# ─── Booking Service ──────────────────────────────────────────────────────────
+
+### 10. Create booking
+POST {{booking_direct}}/api/v1/bookings
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "space_id": "SPACE_ID_HERE",
+  "anfitrion_id": "ANFITRION_ID_HERE",
+  "fecha_inicio": "2026-06-15T14:00:00Z",
+  "fecha_fin": "2026-06-15T18:00:00Z",
+  "num_personas": 30
+}
+
+### 11. Confirm booking (anfitrión token)
+PUT {{booking_direct}}/api/v1/bookings/BOOKING_ID_HERE/confirm
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "nota": "Confirmado. Todo listo para el evento."
+}
+
+### 12. Cancel booking
+PUT {{booking_direct}}/api/v1/bookings/BOOKING_ID_HERE/cancel
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "motivo": "El cliente canceló por problemas de agenda"
+}
+
+### 13. Get booking
+GET {{booking_direct}}/api/v1/bookings/BOOKING_ID_HERE
+Authorization: Bearer {{token}}
+
+### 14. Get client bookings
+GET {{booking_direct}}/api/v1/bookings/client/CLIENT_ID_HERE
+Authorization: Bearer {{token}}
+
+# ─── Via API Gateway (Kong :8000) ─────────────────────────────────────────────
+
+### 15. Register via Kong
+POST {{base}}/api/v1/users/register
+Content-Type: application/json
+
+{
+  "nombre": "Test User",
+  "email": "test@kong.com",
+  "password": "password123",
+  "rol": "cliente"
+}
+
+### 16. Search spaces via Kong (no auth needed)
+GET {{base}}/api/v1/spaces
