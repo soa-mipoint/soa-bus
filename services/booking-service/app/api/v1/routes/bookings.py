@@ -1,5 +1,6 @@
 import random
 import string
+import asyncio
 from datetime import datetime
 from uuid import UUID
 
@@ -72,6 +73,9 @@ async def create_booking(
             status_code=status.HTTP_409_CONFLICT,
             detail="Space is being reserved by another user. Try again in a moment.",
         )
+
+    if settings.TEST_DELAY_AFTER_LOCK_SECONDS > 0:
+        await asyncio.sleep(settings.TEST_DELAY_AFTER_LOCK_SECONDS)
 
     try:
         booking = Booking(

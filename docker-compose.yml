@@ -122,6 +122,7 @@ services:
       JWT_ALGORITHM: HS256
       JWT_ISSUER: mipoint-key
       SPACE_CATALOG_URL: http://space-catalog-service:8000
+      TEST_DELAY_AFTER_LOCK_SECONDS: ${TEST_DELAY_AFTER_LOCK_SECONDS:-0}
     ports:
       - "8003:8000"
     depends_on:

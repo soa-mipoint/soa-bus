@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     # Redis lock TTL in seconds (prevents double-booking during confirmation window)
     LOCK_TTL_SECONDS: int = 300
+    TEST_DELAY_AFTER_LOCK_SECONDS: int = 0
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
