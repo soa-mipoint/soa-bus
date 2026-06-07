@@ -13,7 +13,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
-      - "5433:5432"    # 5433 on host → avoid conflict with local PostgreSQL
+      - "127.0.0.1:5433:5432"    # 5433 on host → avoid conflict with local PostgreSQL
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U mipoint"]
       interval: 10s
@@ -23,7 +23,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6380:6379"    # 6380 on host → avoid conflict with local Redis
+      - "127.0.0.1:6380:6379"    # 6380 on host → avoid conflict with local Redis
     volumes:
       - redis_data:/data
     healthcheck:
@@ -38,8 +38,8 @@ services:
       RABBITMQ_DEFAULT_USER: mipoint
       RABBITMQ_DEFAULT_PASS: mipoint_secret
     ports:
-      - "5672:5672"
-      - "15672:15672"    # Management UI → http://localhost:15672
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"    # Management UI → http://localhost:15672
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
@@ -52,6 +52,9 @@ services:
     build: ./gateway
     volumes:
       - ./gateway/kong.yml:/etc/kong/kong.yml:ro
+    tmpfs:
+      - /usr/local/kong/sockets:mode=1777
+      - /usr/local/kong/pids:mode=1777
     environment:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
@@ -61,7 +64,7 @@ services:
       KONG_PLUGINS: bundled
     ports:
       - "8000:8000"    # API Gateway (main entry point)
-      - "8888:8888"    # Kong Admin API
+      - "127.0.0.1:8888:8888"    # Kong Admin API
     depends_on:
       customer-service:
         condition: service_started
@@ -82,8 +85,9 @@ services:
       JWT_ALGORITHM: HS256
       JWT_EXPIRE_MINUTES: 60
       JWT_ISSUER: mipoint-key
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173,http://localhost:8000}
     ports:
-      - "8001:8000"    # Direct access for dev/testing
+      - "127.0.0.1:8001:8000"    # Direct access for dev/testing
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,9 +105,11 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-supersecretkey-change-in-production-min-32-chars}
       JWT_ALGORITHM: HS256
       JWT_ISSUER: mipoint-key
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-internal-key-change-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173,http://localhost:8000}
       GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
     ports:
-      - "8002:8000"
+      - "127.0.0.1:8002:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -121,10 +127,13 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-supersecretkey-change-in-production-min-32-chars}
       JWT_ALGORITHM: HS256
       JWT_ISSUER: mipoint-key
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-dev-internal-key-change-in-production}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173,http://localhost:8000}
       SPACE_CATALOG_URL: http://space-catalog-service:8000
+      SPACE_NAME_CACHE_TTL_SECONDS: 1800
       TEST_DELAY_AFTER_LOCK_SECONDS: ${TEST_DELAY_AFTER_LOCK_SECONDS:-0}
     ports:
-      - "8003:8000"
+      - "127.0.0.1:8003:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -136,14 +145,18 @@ services:
   notification-service:
     build: ./services/notification-service
     environment:
+      DATABASE_URL: postgresql+asyncpg://mipoint:mipoint_secret@postgres:5432/notifications_db
       RABBITMQ_URL: amqp://mipoint:mipoint_secret@rabbitmq:5672/
       RESEND_API_KEY: ${RESEND_API_KEY:-}
+      FROM_EMAIL: ${FROM_EMAIL:-onboarding@resend.dev}
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
       TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
     ports:
-      - "8004:8000"
+      - "127.0.0.1:8004:8000"
     depends_on:
+      postgres:
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
 

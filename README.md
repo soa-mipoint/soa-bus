@@ -88,6 +88,15 @@ make test-health
 | `space_events` | `space.created`, `space.activated`, `space.availability_updated` |
 | `payment_events` | `payment.completed`, `payment.failed` |
 
+## Correos de reservas
+
+- Booking mantiene el request publico de reservas sin datos derivados como nombre/email del cliente o nombre del espacio.
+- Booking guarda snapshots minimos: nombre del cliente desde JWT y nombre del espacio desde Space Catalog.
+- Redis se usa para locks anti doble-reserva y para cache temporal del nombre del espacio.
+- RabbitMQ transporta eventos de reserva en tiempo real asincrono hacia Notification Service.
+- Notification Service registra `notification_logs` en `notifications_db` para auditoria e idempotencia durable.
+- Los correos escapan datos dinamicos antes de renderizar HTML y no dependen de consultas a bases de otros servicios.
+
 ## Servicios
 
 ### Customer Service (`/api/v1/users`)

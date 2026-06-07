@@ -6,9 +6,10 @@ class Settings(BaseSettings):
     APP_VERSION: str = "1.0.0"
 
     RABBITMQ_URL: str = "amqp://mipoint:mipoint_secret@localhost:5672/"
+    DATABASE_URL: str = "postgresql+asyncpg://mipoint:mipoint_secret@localhost:5432/notifications_db"
 
     RESEND_API_KEY: str = ""
-    FROM_EMAIL: str = "noreply@mipoint.pe"
+    FROM_EMAIL: str = "onboarding@resend.dev"
 
     TWILIO_ACCOUNT_SID: str = ""
     TWILIO_AUTH_TOKEN: str = ""

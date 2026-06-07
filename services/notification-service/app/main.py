@@ -6,6 +6,8 @@ from prometheus_fastapi_instrumentator import Instrumentator
 
 from app.consumers.event_consumer import event_consumer
 from app.core.config import settings
+from app.core.database import Base, close_db, engine
+import app.models  # noqa: F401
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -14,10 +16,14 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting %s — ESB consumer mode...", settings.APP_NAME)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Notification database tables ready.")
     await event_consumer.connect()
     yield
     logger.info("Shutting down %s...", settings.APP_NAME)
     await event_consumer.disconnect()
+    await close_db()
 
 
 app = FastAPI(

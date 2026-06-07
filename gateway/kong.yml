@@ -30,7 +30,9 @@ plugins:
   - name: cors
     config:
       origins:
-        - "*"
+        - http://localhost:3000
+        - http://localhost:5173
+        - https://www.mipoint.com.pe
       methods:
         - GET
         - POST
@@ -59,6 +61,7 @@ services:
           - /api/v1/users/login
         methods:
           - POST
+          - OPTIONS
         strip_path: false
       # Public: health check
       - name: customer-health
@@ -66,6 +69,7 @@ services:
           - /api/v1/users/health
         methods:
           - GET
+          - OPTIONS
         strip_path: false
       # Protected: profile endpoints
       - name: customer-protected-routes
@@ -74,6 +78,7 @@ services:
         methods:
           - GET
           - PUT
+          - OPTIONS
         strip_path: false
         plugins:
           - name: jwt
@@ -95,6 +100,7 @@ services:
           - /api/v1/spaces
         methods:
           - GET
+          - OPTIONS
         strip_path: false
       # Protected: create and manage spaces
       - name: spaces-protected-routes
@@ -104,6 +110,7 @@ services:
           - POST
           - PUT
           - DELETE
+          - OPTIONS
         strip_path: false
         plugins:
           - name: jwt

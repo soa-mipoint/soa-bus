@@ -1,7 +1,9 @@
 import random
 import string
 import asyncio
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 import httpx
@@ -29,6 +31,67 @@ router = APIRouter(prefix="/bookings", tags=["bookings"])
 
 def _generate_code() -> str:
     return "MIP-" + "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
+
+
+def _event_metadata(event_type: str) -> dict[str, str]:
+    return {
+        "event_id": str(uuid.uuid4()),
+        "event_type": event_type,
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+async def _get_space_name_snapshot(redis, space_id: UUID) -> str:
+    cache_key = f"space:snapshot_name:{space_id}"
+    fallback = "Espacio reservado"
+    try:
+        cached = await redis.get(cache_key)
+        if cached:
+            return cached
+    except Exception:
+        pass
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{settings.SPACE_CATALOG_URL}/api/v1/spaces/{space_id}",
+                timeout=3,
+            )
+            response.raise_for_status()
+            nombre = response.json().get("nombre") or fallback
+    except Exception:
+        return fallback
+
+    try:
+        await redis.setex(cache_key, settings.SPACE_NAME_CACHE_TTL_SECONDS, nombre)
+    except Exception:
+        pass
+    return nombre
+
+
+def _internal_headers() -> dict[str, str]:
+    if not settings.INTERNAL_API_KEY:
+        return {}
+    return {"X-Internal-API-Key": settings.INTERNAL_API_KEY}
+
+
+def _build_booking_event(booking: Booking, event_type: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        **_event_metadata(event_type),
+        "booking_id": str(booking.id),
+        "codigo_reserva": booking.codigo_reserva,
+        "cliente_id": str(booking.cliente_id),
+        "cliente_email": booking.cliente_email,
+        "cliente_nombre": booking.cliente_nombre_snapshot or "Usuario",
+        "space_id": str(booking.space_id),
+        "space_nombre": booking.space_nombre_snapshot or "espacio reservado",
+        "anfitrion_id": str(booking.anfitrion_id),
+        "fecha_inicio": booking.fecha_inicio.isoformat(),
+        "fecha_fin": booking.fecha_fin.isoformat(),
+    }
+    if extra:
+        payload.update(extra)
+    return payload
 
 
 async def _get_booking_or_404(booking_id: UUID, db: AsyncSession) -> Booking:
@@ -78,10 +141,14 @@ async def create_booking(
         await asyncio.sleep(settings.TEST_DELAY_AFTER_LOCK_SECONDS)
 
     try:
+        space_nombre = await _get_space_name_snapshot(redis, payload.space_id)
         booking = Booking(
             codigo_reserva=_generate_code(),
             cliente_id=user.user_id,
+            cliente_email=user.email,
+            cliente_nombre_snapshot=user.nombre or "Usuario",
             space_id=payload.space_id,
+            space_nombre_snapshot=space_nombre,
             anfitrion_id=payload.anfitrion_id,
             fecha_inicio=payload.fecha_inicio,
             fecha_fin=payload.fecha_fin,
@@ -106,15 +173,7 @@ async def create_booking(
     await rabbitmq_manager.publish(
         "booking_events",
         "booking.created",
-        {
-            "booking_id": str(booking.id),
-            "codigo_reserva": booking.codigo_reserva,
-            "cliente_id": str(user.user_id),
-            "space_id": str(payload.space_id),
-            "anfitrion_id": str(payload.anfitrion_id),
-            "fecha_inicio": payload.fecha_inicio.isoformat(),
-            "fecha_fin": payload.fecha_fin.isoformat(),
-        },
+        _build_booking_event(booking, "booking.created"),
     )
 
     return BookingResponse.model_validate(booking)
@@ -132,7 +191,7 @@ async def confirm_booking(
     if booking.estado != "PENDIENTE":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot confirm booking in '{booking.estado}' state")
 
-    if user.rol not in ("anfitrion", "admin") and str(booking.anfitrion_id) != str(user.user_id):
+    if user.rol != "admin" and str(booking.anfitrion_id) != str(user.user_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the host can confirm this booking")
 
     history = BookingStatusHistory(
@@ -156,6 +215,7 @@ async def confirm_booking(
                     "fecha_inicio": booking.fecha_inicio.isoformat(),
                     "fecha_fin": booking.fecha_fin.isoformat(),
                 },
+                headers=_internal_headers(),
                 timeout=10,
             )
         except Exception:
@@ -164,15 +224,7 @@ async def confirm_booking(
     await rabbitmq_manager.publish(
         "booking_events",
         "booking.confirmed",
-        {
-            "booking_id": str(booking.id),
-            "codigo_reserva": booking.codigo_reserva,
-            "cliente_id": str(booking.cliente_id),
-            "space_id": str(booking.space_id),
-            "anfitrion_id": str(booking.anfitrion_id),
-            "fecha_inicio": booking.fecha_inicio.isoformat(),
-            "fecha_fin": booking.fecha_fin.isoformat(),
-        },
+        _build_booking_event(booking, "booking.confirmed"),
     )
 
     return BookingResponse.model_validate(booking)
@@ -213,6 +265,7 @@ async def cancel_booking(
             await client.post(
                 f"{settings.SPACE_CATALOG_URL}/api/v1/spaces/{booking.space_id}/availability/release",
                 params={"booking_id": str(booking.id)},
+                headers=_internal_headers(),
                 timeout=10,
             )
         except Exception:
@@ -221,14 +274,7 @@ async def cancel_booking(
     await rabbitmq_manager.publish(
         "booking_events",
         "booking.cancelled",
-        {
-            "booking_id": str(booking.id),
-            "codigo_reserva": booking.codigo_reserva,
-            "cliente_id": str(booking.cliente_id),
-            "space_id": str(booking.space_id),
-            "anfitrion_id": str(booking.anfitrion_id),
-            "motivo": payload.motivo,
-        },
+        _build_booking_event(booking, "booking.cancelled", {"motivo": payload.motivo}),
     )
 
     return BookingResponse.model_validate(booking)

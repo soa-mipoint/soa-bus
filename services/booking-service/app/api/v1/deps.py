@@ -10,9 +10,10 @@ bearer_scheme = HTTPBearer()
 
 
 class CurrentUser:
-    def __init__(self, user_id: UUID, email: str, rol: str):
+    def __init__(self, user_id: UUID, email: str, nombre: str, rol: str):
         self.user_id = user_id
         self.email = email
+        self.nombre = nombre
         self.rol = rol
 
 
@@ -28,6 +29,7 @@ async def get_current_user(
         return CurrentUser(
             user_id=UUID(user_id_str),
             email=payload.get("email", ""),
+            nombre=payload.get("nombre", "Usuario"),
             rol=payload.get("rol", "cliente"),
         )
     except JWTError:

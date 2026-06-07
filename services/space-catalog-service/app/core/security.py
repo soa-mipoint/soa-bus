@@ -10,5 +10,6 @@ def decode_token(token: str) -> dict[str, Any]:
         token,
         settings.JWT_SECRET_KEY,
         algorithms=[settings.JWT_ALGORITHM],
+        issuer=settings.JWT_ISSUER,
         options={"verify_aud": False},
     )

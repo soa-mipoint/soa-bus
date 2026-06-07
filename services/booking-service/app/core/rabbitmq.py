@@ -37,8 +37,7 @@ class RabbitMQManager:
 
     async def publish(self, exchange: str, routing_key: str, payload: dict[str, Any]) -> None:
         if exchange not in self._exchanges:
-            logger.error("Exchange '%s' not found", exchange)
-            return
+            raise RuntimeError(f"Exchange '{exchange}' not found")
         try:
             body = json.dumps(payload, default=str).encode()
             await self._exchanges[exchange].publish(
@@ -48,6 +47,7 @@ class RabbitMQManager:
             logger.info("Published → %s / %s", exchange, routing_key)
         except Exception as exc:
             logger.error("Publish failed: %s", exc)
+            raise
 
 
 rabbitmq_manager = RabbitMQManager()

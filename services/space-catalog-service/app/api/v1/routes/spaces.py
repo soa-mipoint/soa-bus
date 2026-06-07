@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -22,6 +22,11 @@ from app.schemas.space import (
 )
 
 router = APIRouter(prefix="/spaces", tags=["spaces"])
+
+
+async def require_internal_api_key(x_internal_api_key: str | None = Header(default=None)) -> None:
+    if settings.INTERNAL_API_KEY and x_internal_api_key != settings.INTERNAL_API_KEY:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid internal API key")
 
 
 async def _get_space_or_404(space_id: UUID, db: AsyncSession) -> Space:
@@ -179,6 +184,7 @@ async def lock_availability(
     booking_id: UUID,
     fecha_inicio: datetime,
     fecha_fin: datetime,
+    _: None = Depends(require_internal_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     """Internal endpoint called by Booking Service to lock availability."""
@@ -224,6 +230,7 @@ async def lock_availability(
 async def release_availability(
     space_id: UUID,
     booking_id: UUID,
+    _: None = Depends(require_internal_api_key),
     db: AsyncSession = Depends(get_db),
 ):
     """Internal endpoint called by Booking Service to release availability."""

@@ -5,7 +5,7 @@ asyncpg==0.30.0
 alembic==1.14.0
 pydantic==2.10.3
 pydantic-settings==2.6.1
-python-jose[cryptography]==3.3.0
+python-jose[cryptography]==3.4.0
 redis[asyncio]==5.2.1
 aio-pika==9.4.3
 prometheus-fastapi-instrumentator==7.0.0
