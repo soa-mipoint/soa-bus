@@ -20,6 +20,7 @@ class Booking(Base):
     cliente_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     cliente_email = Column(String(255), nullable=True)
     cliente_nombre_snapshot = Column(String(255), nullable=True)
+    cliente_phone_snapshot = Column(String(20), nullable=True)
     space_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     space_nombre_snapshot = Column(String(255), nullable=True)
     anfitrion_id = Column(UUID(as_uuid=True), nullable=False)

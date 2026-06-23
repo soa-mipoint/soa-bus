@@ -30,7 +30,7 @@ def upgrade() -> None:
         sa.Column("email", sa.String(255), nullable=False, unique=True),
         sa.Column("hashed_password", sa.String(255), nullable=False),
         sa.Column("nombre", sa.String(255), nullable=False),
-        sa.Column("rol", sa.Enum("cliente", "anfitrion", "admin", name="user_role"), nullable=False),
+        sa.Column("rol", postgresql.ENUM("cliente", "anfitrion", "admin", name="user_role", create_type=False), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )

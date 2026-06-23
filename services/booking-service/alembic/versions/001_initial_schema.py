@@ -34,7 +34,7 @@ def upgrade() -> None:
         sa.Column("fecha_inicio", sa.DateTime(timezone=True), nullable=False),
         sa.Column("fecha_fin", sa.DateTime(timezone=True), nullable=False),
         sa.Column("num_personas", sa.Integer, nullable=False),
-        sa.Column("estado", sa.Enum("PENDIENTE", "CONFIRMADA", "CANCELADA", "PAGADA", name="booking_status"), nullable=False, server_default="PENDIENTE"),
+        sa.Column("estado", postgresql.ENUM("PENDIENTE", "CONFIRMADA", "CANCELADA", "PAGADA", name="booking_status", create_type=False), nullable=False, server_default="PENDIENTE"),
         sa.Column("motivo_cancelacion", sa.Text, nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),

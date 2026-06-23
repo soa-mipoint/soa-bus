@@ -13,7 +13,13 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.notification_log import NotificationLog
 from app.notifications.email import EmailSendResult, send_email
-from app.notifications.templates import render_booking_email, render_welcome_email
+from app.notifications.sms import SmsSendResult, send_sms
+from app.notifications.templates import (
+    render_booking_email,
+    render_booking_sms,
+    render_welcome_email,
+    render_welcome_sms,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +50,7 @@ def _event_type(payload: dict, routing_key: str) -> str:
     return str(payload.get("event_type") or routing_key)
 
 
-async def _send_with_log(payload: dict, routing_key: str, to: str, subject: str, html: str) -> EmailSendResult:
+async def _send_email_with_log(payload: dict, routing_key: str, to: str, subject: str, html: str) -> EmailSendResult:
     event_id = _event_id(payload, routing_key)
     event_type = _event_type(payload, routing_key)
 
@@ -54,6 +60,7 @@ async def _send_with_log(payload: dict, routing_key: str, to: str, subject: str,
                 NotificationLog.event_id == event_id,
                 NotificationLog.recipient_email == to,
                 NotificationLog.event_type == event_type,
+                NotificationLog.provider == "resend",
             )
         )
         log = result.scalar_one_or_none()
@@ -91,6 +98,68 @@ async def _send_with_log(payload: dict, routing_key: str, to: str, subject: str,
                 NotificationLog.event_id == event_id,
                 NotificationLog.recipient_email == to,
                 NotificationLog.event_type == event_type,
+                NotificationLog.provider == "resend",
+            )
+        )
+        log = result.scalar_one_or_none()
+        if log:
+            log.status = "SENT" if send_result.success else "FAILED"
+            log.provider_message_id = send_result.provider_message_id
+            log.error_message = send_result.error_message
+            await session.commit()
+
+    return send_result
+
+
+async def _send_sms_with_log(payload: dict, routing_key: str, to: str, body: str) -> SmsSendResult:
+    event_id = _event_id(payload, routing_key)
+    event_type = _event_type(payload, routing_key)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(NotificationLog).where(
+                NotificationLog.event_id == event_id,
+                NotificationLog.recipient_email == to,
+                NotificationLog.event_type == event_type,
+                NotificationLog.provider == "twilio",
+            )
+        )
+        log = result.scalar_one_or_none()
+        if log and log.status in ("SENT", "PROCESSING"):
+            logger.info("SMS skipped for duplicate event %s to %s", event_id, to)
+            return SmsSendResult(success=True, provider_message_id=log.provider_message_id)
+
+        if not log:
+            log = NotificationLog(
+                event_id=event_id,
+                event_type=event_type,
+                recipient_email=to,
+                subject=body[:255],
+                provider="twilio",
+                status="PROCESSING",
+            )
+            session.add(log)
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                logger.info("SMS skipped for concurrent duplicate event %s to %s", event_id, to)
+                return SmsSendResult(success=True)
+        else:
+            log.subject = body[:255]
+            log.status = "PROCESSING"
+            log.error_message = None
+            await session.commit()
+
+    send_result = await asyncio.to_thread(send_sms, to, body)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(NotificationLog).where(
+                NotificationLog.event_id == event_id,
+                NotificationLog.recipient_email == to,
+                NotificationLog.event_type == event_type,
+                NotificationLog.provider == "twilio",
             )
         )
         log = result.scalar_one_or_none()
@@ -145,19 +214,33 @@ class EventConsumer:
                 email = payload.get("email", "")
                 nombre = str(payload.get("nombre", "Usuario"))
                 logger.info("user.registered received - sending welcome email to %s", email)
-                if not email:
+                email_result = EmailSendResult(success=True)
+                if email:
+                    email_result = await _send_email_with_log(
+                        payload,
+                        "user.registered",
+                        email,
+                        "Tu cuenta en MiPoint ya esta lista",
+                        render_welcome_email(nombre),
+                    )
+                    if not email_result.success:
+                        logger.warning("user.registered email delivery failed for %s", email)
+                else:
                     logger.warning("user.registered missing email - email not sent")
-                    return
-                result = await _send_with_log(
-                    payload,
-                    "user.registered",
-                    email,
-                    "Tu cuenta en MiPoint ya esta lista",
-                    render_welcome_email(nombre),
-                )
-                if not result.success:
-                    logger.warning("user.registered email delivery failed for %s", email)
-                    raise RuntimeError(result.error_message or "user.registered email delivery failed")
+                phone = payload.get("phone")
+                if phone:
+                    sms_result = await _send_sms_with_log(
+                        payload,
+                        "user.registered",
+                        str(phone),
+                        render_welcome_sms(nombre),
+                    )
+                    if not sms_result.success:
+                        logger.warning("user.registered SMS delivery failed for %s", phone)
+                else:
+                    logger.warning("user.registered missing phone - SMS not sent")
+                if not email_result.success:
+                    raise RuntimeError(email_result.error_message or "user.registered email delivery failed")
             except Exception as exc:
                 logger.error("Error handling user.registered: %s", exc)
                 raise
@@ -186,86 +269,156 @@ class EventConsumer:
 
     async def _notify_booking_created(self, payload: dict, routing_key: str) -> None:
         codigo = payload.get("codigo_reserva", "N/A")
+        title = "Reserva recibida"
+        message = "Recibimos tu solicitud de reserva. El anfitrion la revisara y te notificaremos cuando sea confirmada."
+        space_nombre = str(payload.get("space_nombre") or "espacio reservado")
+        fecha_inicio = _format_datetime(str(payload.get("fecha_inicio", "")))
+        fecha_fin = _format_datetime(str(payload.get("fecha_fin", "")))
+        status_label = "Pendiente de confirmacion"
         email = payload.get("cliente_email")
-        if not email:
+        email_result = EmailSendResult(success=True)
+        if email:
+            email_result = await _send_email_with_log(
+                payload,
+                routing_key,
+                email,
+                f"Reserva recibida - {codigo}",
+                render_booking_email(
+                    title=title,
+                    greeting_name=str(payload.get("cliente_nombre") or "Usuario"),
+                    message=message,
+                    space_nombre=space_nombre,
+                    codigo_reserva=str(payload.get("codigo_reserva", "N/A")),
+                    fecha_inicio=fecha_inicio,
+                    fecha_fin=fecha_fin,
+                    status_label=status_label,
+                    cta_label="Ver mi reserva",
+                ),
+            )
+            if not email_result.success:
+                logger.warning("booking.created email delivery failed for %s", codigo)
+        else:
             logger.warning("booking.created missing cliente_email - email not sent for %s", codigo)
-            return
-        result = await _send_with_log(
-            payload,
-            routing_key,
-            email,
-            f"Reserva recibida - {codigo}",
-            render_booking_email(
-                title="Reserva recibida",
-                greeting_name=str(payload.get("cliente_nombre") or "Usuario"),
-                message="Recibimos tu solicitud de reserva. El anfitrion la revisara y te notificaremos cuando sea confirmada.",
-                space_nombre=str(payload.get("space_nombre") or "espacio reservado"),
-                codigo_reserva=str(payload.get("codigo_reserva", "N/A")),
-                fecha_inicio=_format_datetime(str(payload.get("fecha_inicio", ""))),
-                fecha_fin=_format_datetime(str(payload.get("fecha_fin", ""))),
-                status_label="Pendiente de confirmacion",
-                cta_label="Ver mi reserva",
-            ),
-        )
-        if not result.success:
-            logger.warning("booking.created email delivery failed for %s", codigo)
-            raise RuntimeError(result.error_message or f"booking.created email delivery failed for {codigo}")
+        await self._send_booking_sms(payload, routing_key, title, space_nombre, str(codigo), fecha_inicio, fecha_fin, status_label)
+        if not email_result.success:
+            raise RuntimeError(email_result.error_message or f"booking.created email delivery failed for {codigo}")
 
     async def _notify_booking_confirmed(self, payload: dict, routing_key: str) -> None:
         codigo = payload.get("codigo_reserva", "N/A")
+        title = "Reserva confirmada"
+        message = "Tu reserva fue confirmada correctamente. Ya puedes coordinar los detalles finales de tu evento con tranquilidad."
+        space_nombre = str(payload.get("space_nombre") or "espacio reservado")
+        fecha_inicio = _format_datetime(str(payload.get("fecha_inicio", "")))
+        fecha_fin = _format_datetime(str(payload.get("fecha_fin", "")))
+        status_label = "Confirmada"
         email = payload.get("cliente_email")
-        if not email:
+        email_result = EmailSendResult(success=True)
+        if email:
+            email_result = await _send_email_with_log(
+                payload,
+                routing_key,
+                email,
+                f"Reserva confirmada - {codigo}",
+                render_booking_email(
+                    title=title,
+                    greeting_name=str(payload.get("cliente_nombre") or "Usuario"),
+                    message=message,
+                    space_nombre=space_nombre,
+                    codigo_reserva=str(payload.get("codigo_reserva", "N/A")),
+                    fecha_inicio=fecha_inicio,
+                    fecha_fin=fecha_fin,
+                    status_label=status_label,
+                    cta_label="Ver detalles",
+                ),
+            )
+            if not email_result.success:
+                logger.warning("booking.confirmed email delivery failed for %s", codigo)
+        else:
             logger.warning("booking.confirmed missing cliente_email - email not sent for %s", codigo)
-            return
-        result = await _send_with_log(
-            payload,
-            routing_key,
-            email,
-            f"Reserva confirmada - {codigo}",
-            render_booking_email(
-                title="Reserva confirmada",
-                greeting_name=str(payload.get("cliente_nombre") or "Usuario"),
-                message="Tu reserva fue confirmada correctamente. Ya puedes coordinar los detalles finales de tu evento con tranquilidad.",
-                space_nombre=str(payload.get("space_nombre") or "espacio reservado"),
-                codigo_reserva=str(payload.get("codigo_reserva", "N/A")),
-                fecha_inicio=_format_datetime(str(payload.get("fecha_inicio", ""))),
-                fecha_fin=_format_datetime(str(payload.get("fecha_fin", ""))),
-                status_label="Confirmada",
-                cta_label="Ver detalles",
-            ),
-        )
-        if not result.success:
-            logger.warning("booking.confirmed email delivery failed for %s", codigo)
-            raise RuntimeError(result.error_message or f"booking.confirmed email delivery failed for {codigo}")
+        await self._send_booking_sms(payload, routing_key, title, space_nombre, str(codigo), fecha_inicio, fecha_fin, status_label)
+        if not email_result.success:
+            raise RuntimeError(email_result.error_message or f"booking.confirmed email delivery failed for {codigo}")
 
     async def _notify_booking_cancelled(self, payload: dict, routing_key: str) -> None:
         codigo = payload.get("codigo_reserva", "N/A")
         motivo = payload.get("motivo", "")
+        title = "Reserva cancelada"
+        message = "Tu reserva fue cancelada. Si necesitas otro espacio, puedes volver a buscar opciones disponibles en MiPoint."
+        space_nombre = str(payload.get("space_nombre") or "espacio reservado")
+        fecha_inicio = _format_datetime(str(payload.get("fecha_inicio", "")))
+        fecha_fin = _format_datetime(str(payload.get("fecha_fin", "")))
+        status_label = "Cancelada"
         email = payload.get("cliente_email")
-        if not email:
+        email_result = EmailSendResult(success=True)
+        if email:
+            email_result = await _send_email_with_log(
+                payload,
+                routing_key,
+                email,
+                f"Reserva cancelada - {codigo}",
+                render_booking_email(
+                    title=title,
+                    greeting_name=str(payload.get("cliente_nombre") or "Usuario"),
+                    message=message,
+                    space_nombre=space_nombre,
+                    codigo_reserva=str(payload.get("codigo_reserva", "N/A")),
+                    fecha_inicio=fecha_inicio,
+                    fecha_fin=fecha_fin,
+                    status_label=status_label,
+                    cta_label="Buscar otro espacio",
+                    motivo=str(motivo) if motivo else None,
+                ),
+            )
+            if not email_result.success:
+                logger.warning("booking.cancelled email delivery failed for %s", codigo)
+        else:
             logger.warning("booking.cancelled missing cliente_email - email not sent for %s", codigo)
-            return
-        result = await _send_with_log(
+        await self._send_booking_sms(
             payload,
             routing_key,
-            email,
-            f"Reserva cancelada - {codigo}",
-            render_booking_email(
-                title="Reserva cancelada",
-                greeting_name=str(payload.get("cliente_nombre") or "Usuario"),
-                message="Tu reserva fue cancelada. Si necesitas otro espacio, puedes volver a buscar opciones disponibles en MiPoint.",
-                space_nombre=str(payload.get("space_nombre") or "espacio reservado"),
-                codigo_reserva=str(payload.get("codigo_reserva", "N/A")),
-                fecha_inicio=_format_datetime(str(payload.get("fecha_inicio", ""))),
-                fecha_fin=_format_datetime(str(payload.get("fecha_fin", ""))),
-                status_label="Cancelada",
-                cta_label="Buscar otro espacio",
-                motivo=str(motivo) if motivo else None,
+            title,
+            space_nombre,
+            str(codigo),
+            fecha_inicio,
+            fecha_fin,
+            status_label,
+            str(motivo) if motivo else None,
+        )
+        if not email_result.success:
+            raise RuntimeError(email_result.error_message or f"booking.cancelled email delivery failed for {codigo}")
+
+    async def _send_booking_sms(
+        self,
+        payload: dict,
+        routing_key: str,
+        title: str,
+        space_nombre: str,
+        codigo_reserva: str,
+        fecha_inicio: str,
+        fecha_fin: str,
+        status_label: str,
+        motivo: str | None = None,
+    ) -> None:
+        phone = payload.get("cliente_phone")
+        if not phone:
+            logger.warning("%s missing cliente_phone - SMS not sent for %s", routing_key, codigo_reserva)
+            return
+        result = await _send_sms_with_log(
+            payload,
+            routing_key,
+            str(phone),
+            render_booking_sms(
+                title=title,
+                space_nombre=space_nombre,
+                codigo_reserva=codigo_reserva,
+                fecha_inicio=fecha_inicio,
+                fecha_fin=fecha_fin,
+                status_label=status_label,
+                motivo=motivo,
             ),
         )
         if not result.success:
-            logger.warning("booking.cancelled email delivery failed for %s", codigo)
-            raise RuntimeError(result.error_message or f"booking.cancelled email delivery failed for {codigo}")
+            logger.warning("%s SMS delivery failed for %s", routing_key, codigo_reserva)
 
 
 event_consumer = EventConsumer()

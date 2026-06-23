@@ -141,6 +141,13 @@ def render_welcome_email(nombre: str) -> str:
     )
 
 
+def render_welcome_sms(nombre: str) -> str:
+    return (
+        f"MiPoint: Hola {nombre or 'Usuario'}, tu cuenta fue creada con exito. "
+        "Ya puedes buscar locales, comparar opciones y reservar espacios para tus eventos."
+    )
+
+
 def render_booking_email(
     *,
     title: str,
@@ -187,3 +194,31 @@ def render_booking_email(
         body,
         "Nota de seguridad: MiPoint nunca te pedira pagos, claves o datos sensibles por correo.",
     )
+
+
+def render_booking_sms(
+    *,
+    title: str,
+    space_nombre: str,
+    codigo_reserva: str,
+    fecha_inicio: str,
+    fecha_fin: str,
+    status_label: str,
+    motivo: str | None = None,
+) -> str:
+    if status_label == "Pendiente de confirmacion":
+        intro = "Recibimos tu solicitud de reserva. El anfitrion la revisara y te avisaremos cuando sea confirmada."
+    elif status_label == "Confirmada":
+        intro = "Tu reserva fue confirmada correctamente."
+    elif status_label == "Cancelada":
+        intro = "Tu reserva fue cancelada."
+    else:
+        intro = title
+
+    message = (
+        f"MiPoint: {intro} Estado: {status_label}. Espacio: {space_nombre}. "
+        f"Codigo: {codigo_reserva}. Inicio: {fecha_inicio}. Fin: {fecha_fin}."
+    )
+    if motivo:
+        message += f" Motivo: {motivo}."
+    return message

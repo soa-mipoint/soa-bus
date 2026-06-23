@@ -29,6 +29,7 @@ Content-Type: application/json
 {
   "nombre": "Juan Pérez",
   "email": "juan@test.com",
+  "phone": "+51999888777",
   "password": "password123",
   "rol": "cliente"
 }
@@ -40,6 +41,7 @@ Content-Type: application/json
 {
   "nombre": "María García",
   "email": "maria@test.com",
+  "phone": "+51999777666",
   "password": "password123",
   "rol": "anfitrion"
 }
@@ -153,6 +155,7 @@ Content-Type: application/json
 {
   "nombre": "Test User",
   "email": "test@kong.com",
+  "phone": "+51999666555",
   "password": "password123",
   "rol": "cliente"
 }

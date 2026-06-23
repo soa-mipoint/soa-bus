@@ -42,6 +42,7 @@ def _build_user_event(user: User, event_type: str, extra: dict[str, Any] | None 
         "user_id": str(user.id),
         "email": user.email,
         "nombre": user.nombre,
+        "phone": user.profile.phone if user.profile else None,
         "rol": user.rol,
     }
     if extra:
@@ -61,7 +62,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
         nombre=payload.nombre,
         rol=payload.rol.value,
     )
-    profile = Profile(user=user)
+    profile = Profile(user=user, phone=payload.phone)
     db.add(user)
     db.add(profile)
     await db.commit()
@@ -71,6 +72,7 @@ async def register(payload: RegisterRequest, db: AsyncSession = Depends(get_db))
         "sub": str(user.id),
         "email": user.email,
         "nombre": user.nombre,
+        "phone": user.profile.phone if user.profile else None,
         "rol": user.rol,
     })
 
@@ -96,6 +98,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
         "sub": str(user.id),
         "email": user.email,
         "nombre": user.nombre,
+        "phone": user.profile.phone if user.profile else None,
         "rol": user.rol,
     })
 
@@ -109,6 +112,7 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db)):
             "user_id": str(user.id),
             "email": user.email,
             "nombre": user.nombre,
+            "phone": user.profile.phone if user.profile else None,
             "rol": user.rol,
         }),
     )

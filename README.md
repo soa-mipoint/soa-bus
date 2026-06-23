@@ -88,18 +88,19 @@ make test-health
 | `space_events` | `space.created`, `space.activated`, `space.availability_updated` |
 | `payment_events` | `payment.completed`, `payment.failed` |
 
-## Correos de reservas
+## Notificaciones de reservas
 
 - Booking mantiene el request publico de reservas sin datos derivados como nombre/email del cliente o nombre del espacio.
-- Booking guarda snapshots minimos: nombre del cliente desde JWT y nombre del espacio desde Space Catalog.
+- Booking guarda snapshots minimos: email, telefono y nombre del cliente desde JWT, y nombre del espacio desde Space Catalog.
 - Redis se usa para locks anti doble-reserva y para cache temporal del nombre del espacio.
 - RabbitMQ transporta eventos de reserva en tiempo real asincrono hacia Notification Service.
-- Notification Service registra `notification_logs` en `notifications_db` para auditoria e idempotencia durable.
+- Notification Service envia email con Resend y SMS con Twilio, registrando `notification_logs` en `notifications_db` para auditoria e idempotencia durable.
 - Los correos escapan datos dinamicos antes de renderizar HTML y no dependen de consultas a bases de otros servicios.
 
 ## Servicios
 
 ### Customer Service (`/api/v1/users`)
+- `POST /register` requiere `phone` en formato E.164, por ejemplo `+51999999999`.
 - `POST /register` — Registro de usuario (cliente o anfitrión)
 - `POST /login` — Login → JWT token
 - `GET /profile` — Perfil del usuario autenticado
@@ -128,6 +129,7 @@ Para producción necesitas:
 - `RABBITMQ_URL` — CloudAMQP connection string  
 - `REDIS_URL` — Upstash Redis URL
 - `RESEND_API_KEY` — Para emails
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` - Para SMS
 - `JWT_SECRET_KEY` — Mínimo 32 caracteres, seguro
 
 ## Deployment (Cloud Run)

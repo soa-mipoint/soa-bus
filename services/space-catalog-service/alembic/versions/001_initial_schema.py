@@ -34,7 +34,7 @@ def upgrade() -> None:
         sa.Column("distrito", sa.String(100), nullable=False),
         sa.Column("capacidad", sa.Integer, nullable=False),
         sa.Column("precio_hora", sa.Float, nullable=False),
-        sa.Column("estado", sa.Enum("ACTIVO", "INACTIVO", "PENDIENTE", name="space_status"), nullable=False, server_default="PENDIENTE"),
+        sa.Column("estado", postgresql.ENUM("ACTIVO", "INACTIVO", "PENDIENTE", name="space_status", create_type=False), nullable=False, server_default="PENDIENTE"),
         sa.Column("lat", sa.Float, nullable=True),
         sa.Column("lng", sa.Float, nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
