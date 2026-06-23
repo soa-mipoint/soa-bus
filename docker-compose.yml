@@ -39,7 +39,7 @@ services:
       RABBITMQ_DEFAULT_PASS: mipoint_secret
     ports:
       - "127.0.0.1:5672:5672"
-      - "127.0.0.1:15672:15672"    # Management UI → http://localhost:15672
+      - "15672:15672"    # Management UI → http://localhost:15672
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
